@@ -3,7 +3,7 @@
 -- Just in case you want your numbers to get exotic~
 ---------------------------------------------
 
-local CUTIL.FieldExtension = {}
+CUTIL.FieldExtension = {}
 CUTIL.FieldExtension.__index = CUTIL.FieldExtension
 
 --- Creates a new element in F[x]/(modulus).
@@ -270,8 +270,8 @@ function CUTIL.resolve_alias_value(v, recursion_limit)
 		local r = (CUTIL.resolve_alias and CUTIL.resolve_alias(v)) or CUTIL.aliases[v]
 		
 		if recursion_limit > 0 then
-			temp = resolve_alias_value_recursive(v, r, recursion_limit - 1)
-			if temp ~= nil
+			local temp = resolve_alias_value_recursive(v, r, recursion_limit - 1)
+			if temp ~= nil then
 				r = temp
 			end
 		end
@@ -648,4 +648,225 @@ function CUTIL.Tween.make_modifier(target_domain, p_i, opts)
 	local shape = CUTIL.Tween.create(p_i, opts)
 	
 	return shape.eval
+end
+
+---------------------------------------------
+-- Value Exchange System
+-- This allows you to create a system wherein you can take a set of types of values (i.e. currencies) and convert between them.
+---------------------------------------------
+
+CUTIL.ExchangeSystems = { systems = {} }
+local systems = CUTIL.ExchangeSystems.systems;
+
+-- Internal helpers
+
+-- Axis variable naming that is collision-safe and opaque
+local function axis_var_name(system, axis)
+	return "__exchange__" .. system .. "::" .. axis
+end
+
+-- Internal getter for the raw stored value
+local function get_raw(system, axis)
+	return CUTIL.get_variable(sys.axes[axis])
+end
+
+-- Internal setter for the raw stored value
+local function set_raw(system, axis)
+	CUTIL.set_variable(sys.axes[axis], value)
+end
+
+
+-- End internal helpers
+
+--- Creates a new exchange system.
+---
+--- @param name string The (unique) system name.
+--- @param opts table|nil Options:
+--- 	- canonical string The name of the canonical axis (default "base").
+--- 	- value number Initial value of the canonical axis (default 1).
+--- 	- dimension string|nil Optional dimension tag (e.g. "currency").
+--- 	- use_log boolean Whether or not to store values in log-space (default false).
+--- 	- on_change function|nil Hook: (system, axis, old, new).
+function CUTIL.ExchangeSystems.new_system(name, opts)
+	assert(type(name) == "string", "System name must be a string")
+	assert(systems[name] == nil, "Specified exchange system already exists")
+
+	opts = opts or {}
+	local canonical = opts.canonical or "base"
+	local value = opts.value or 1
+	local use_log = opts.use_log or false
+	
+	assert(type(value) == "number" and value > 0, "canonical value must be positive")
+	
+	systems[name] = {
+		canonical = canonical,
+		axes = {},
+		dimension = opts.dimension,
+		use_log = use_log,
+		on_change = opts.on_change
+	}
+	
+	local var = axis_var_name(name, canonical)
+	systems[name].axes[canonical] = var
+	
+	if use_log then
+		CUTIL.add_variable(var, math.log(value))
+	else
+		CUTIL.add_variable(var, value)
+	end
+end
+
+--- Adds an axis to an exchange system.
+--- 
+--- @param system string
+--- @param axis string
+--- @param relative number|nil Value relative to canonical axis (default 1).
+function CUTIL.ExchangeSystems.add_axis(system, axis, relative)
+	local sys = systems[system]
+	assert(sys, "Specified exchange system does not exist")
+	assert(type(axis) == "string", "Axis name must be a string")
+	assert(sys.axes[axis] == nil, "Specified axis already exists")
+	
+	relative = relative or 1
+	assert(type(relative) == "number" and relative > 0, "Relative value must be a positive number")
+	
+	local base = get_raw(sys, sys.canonical)
+	local var = axis_var_name(system, axis)
+	sys.axes[axis] = var
+	
+	if sys.use_log then
+		CUTIL.add_variable(var, base + math.log(relative))
+	else
+		CUTIL.add_variable(var, base * relative)
+	end
+end
+
+--- Removes an axis from a system.
+--- If the axis is canonical, the system is renormalized.
+---
+--- @param system string
+--- @param axis string
+function CUTIL.ExchangeSystems.remove_axis(system, axis)
+	local sys = systems[system]
+	assert(sys, "Specified exchange system does not exist")
+	
+	local var = sys.axes[axis]
+	assert(var, "Specified axis does not exist")
+	
+	if axis == sys.canonical then
+		local new_canonical
+		
+		for a in pairs(sys.axes) do
+			if a ~= axis then
+				new_canonical = a
+				break
+			end
+		end
+		
+		assert(new_canonical, "Cannot remove the only axis in the system")
+		
+		local scale = get_raw(sys, new_canonical)
+		
+		for a in pairs(sys.axes) do
+			if sys.use_log then
+				set_raw(sys, a, get_raw(sys, a) - scale)
+			else
+				set_raw(sys, a, get_raw(sys, a) / scale)
+			end
+		end
+		
+		sys.canonical = new_canonical
+	end
+	
+	sys.axes[axis] = nil
+	CUTIL.remove_variable(var)
+end
+
+--- Sets the normalized value of an axis.
+---
+--- @param system string
+--- @param axis string
+--- @param relative number A positive number representing the relative value.
+function CUTIL.ExchangeSystems.set_axis(system, axis, relative)
+	assert(type(relative) == "number" and relative > 0, "Relative value must be a positive number")
+	
+	local sys = systems[system_name]
+	assert(sys, "Specified exchange system does not exist")
+	
+	local var = sys.axes[axis]
+	assert(var, "Specified axis does not exist")
+	
+	local base = get_raw(sys, sys.canonical)
+	local old = get_raw(sys, axis)
+	
+	if sys.use_log then
+		set_raw(sys, axis, base + math.log(relative))
+	else
+		set_raw(sys, axis, base * relative)
+	end
+	
+	if sys.on_change then
+		sys.on_change(system, axis, old, get_raw(sys, axis))
+	end
+end
+
+--- Returns the normalized value of an axis.
+--- This is dimensionless and invariant.
+---
+--- @param system string
+--- @param axis string
+--- @return number
+function CUTIL.ExchangeSystems.get_axis(system, axis)
+	local sys = systems[system]
+	assert(sys, "Specified exchange system does not exist")
+	
+	local var = sys.axes[axis]
+	assert(var, "Specified axis does not exist")
+	
+	local base = get_raw(sys, sys.canonical)
+	local value = get_raw(sys, axis)
+	
+	if sys.use_log then
+		return math.exp(value - base)
+	end
+	
+	return value / base
+end
+
+--- Converts a value from one axis to another.
+---
+--- @param system string
+--- @param value number
+--- @param from_axis string
+--- @param to_axis string
+--- @return number
+function CUTIL.ExchangeSystems.convert(system, value, from_axis, to_axis)
+	assert(type(value) == "number", "Value must be numeric")
+	
+	local sys = systems[system]
+	assert(sys, "Specified exchange system does not exist")
+	
+	local value_from = CUTIL.ExchangeSystems.get_axis(system, from_axis)
+	local value_to = CUTIL.ExchangeSystems.get_axis(system, to_axis)
+	
+	-- value * value_from = x * value_to
+	return value * (value_from / value_to)
+end
+
+--- Converts a value from one axis to another, along with a fractional fee in [0, 1].
+---
+--- @param system string
+--- @param value number
+--- @param from_axis string
+--- @param to_axis string
+--- @param fee number
+--- @return number
+function CUTIL.ExchangeSystems.convert_with_fee(system, value, from_axis, to_axis, fee)
+	assert(fee >= 0 and fee <= 1, "Fee must be in [0, 1]")
+	
+	local remaining_percentage_after_fee = 1 - fee
+	
+	local conversion = CUTIL.ExchangeSystems.convert(system, value, from_axis, to_axis)
+	
+	return conversion * remaining_percentage_after_fee
 end
