@@ -5,7 +5,7 @@
 	"description": "Just adds a bunch of QoL functions for modding. Shouldn't do anything on its own.",
 	"prefix": "coroboutil",
 	"main_file": "Corobo.lua",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	
 	"git_owner": "TheCoroboCorner",
 	"allow_redistribution": true
