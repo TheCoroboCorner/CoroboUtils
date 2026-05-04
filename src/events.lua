@@ -5,6 +5,7 @@
 
 CUTIL.Events = { registry = {} }
 local registry = CUTIL.Events.registry
+local event_functions = {}
 
 -- Internal helpers
 
@@ -176,25 +177,13 @@ end
 
 -- End internal helpers
 
--- Default effect application hook. If SMODS.calculate_effect exists, call it, otherwise just delegate to the user-provided CUTIL.Events.on_effect_apply which does nothing by default.
+-- Default effect application hook. Calls SMODS.calculate_effect.
 function CUTIL.Events.apply_effects(effect_table, scored_card, from_edition, context)
 	if not effect_table then
 		return
 	end
 	
-	-- Just to be absolutely 100% sure that SMODS.calculate_effect even exists; I don't want to handle weird crashes
-	if type(SMODS) == "table" and type(SMODS.calculate_effect) == "function" then
-		SMODS.calculate_effect(effect_table, scored_card, from_edition)
-	else
-		-- Expose a hook as a fallback
-		if CUTIL.Events.on_effect_apply then
-			CUTIL.Events.on_effect_apply(effect_table, scored_card, context)
-		end
-	end
-end
-
--- No-op hook intended to be overwritten by other mods
-CUTIL.Events.on_effect_apply = function(effect_table, scored_card, context)
+	SMODS.calculate_effect(effect_table, scored_card, from_edition)
 end
 	
 --- Adds an event into the registry.
@@ -247,7 +236,7 @@ function CUTIL.Events.add(owner, name, fn, opts)
 	table.insert(registry[bucket], event)
 	
 	-- persist the function in the variable system as the source-of-truth
-	assert(CUTIL.add_variable(event_var_name(owner, name), fn), "Failed to register event variable")
+	event_functions[event_var_name(owner, name)] = fn
 end
 
 --- Removes a single event.
@@ -261,7 +250,7 @@ function CUTIL.Events.remove(owner, name)
 			
 			if evt.owner == owner and evt.name == name then
 				table.remove(bucket_table, i)
-				CUTIL.remove_variable(event_var_name(owner, name))
+				event_functions[event_var_name(owner, name)] = nil
 			end
 		end
 	end
@@ -273,7 +262,7 @@ end
 --- @param name string
 --- @return function|nil
 function CUTIL.Events.get(owner, name)
-	return CUTIL.get_variable(event_var_name(owner, name))
+	return event_functions[event_var_name(owner, name)]
 end
 
 --- Sets/updates a registered event's callback.
@@ -285,7 +274,7 @@ function CUTIL.Events.set(owner, name, fn)
 	assert(type(fn) == "function", "fn must be function")
 	assert(CUTIL.Events.get(owner, name), "Specified event does not exist")
 	
-	CUTIL.set_variable(event_var_name(owner, name), fn)
+	event_functions[event_var_name(owner, name)] = fn
 end
 
 --- Remove all events owned by a specific owner/mod.
@@ -298,7 +287,7 @@ function CUTIL.Events.remove_owner(owner)
 			
 			if evt.owner == owner then
 				table.remove(bucket_table, i)
-				CUTIL.remove_variable(event_var_name(evt.owner, evt.name))
+				event_functions[event_var_name(evt.owner, evt.name)] = nil
 			end
 		end
 	end
@@ -360,7 +349,7 @@ function CUTIL.Events.dispatch(self, card, context)
 	local to_remove = {}
 	
 	for _, evt in ipairs(snapshot) do
-		local fn = CUTIL.get_variable(event_var_name(evt.owner, evt.name))
+		local fn = event_functions[event_var_name(evt.owner, evt.name)]
 		
 		if type(fn) == "function" then
 			local ok, result = xpcall(function() return fn(self, card, context) end, debug.traceback)

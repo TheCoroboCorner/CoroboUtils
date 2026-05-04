@@ -101,23 +101,33 @@ end
 --- Names of variables are mapped to their values.
 local variables = {}
 
+--- Authoritative modifier type definitions.
+local modifier_types = {}
+
 --- Registers a variable with a default value.
 --- It returns whether or not the addition was successful.
 function CUTIL.add_variable(name, default_value)
-	if variables[name] == nil then
+	if not variables[name] then
 		variables[name] = default_value
+		
+		CUTIL.ensure_variable_integrity()
+		CUTIL.update_game_variables()
+		
 		return true
 	end
+	
 	return false
 end
 
 function CUTIL.remove_variable(name)
-	if variables[name] == nil then return false end
+	if not variables[name] then return false end
 	
 	variables[name] = nil
 	if G.GAME and G.GAME.cutil_vars then
 		G.GAME.cutil_vars[name] = nil
 	end
+	
+	CUTIL.update_game_variables()
 	
 	return true
 end
@@ -130,6 +140,9 @@ end
 
 function CUTIL.set_variable(name, value)
 	variables[name] = value
+	
+	CUTIL.ensure_variable_integrity()
+	CUTIL.update_game_variables()
 end
 
 function CUTIL.get_variable(name)
@@ -139,6 +152,8 @@ end
 
 --- Ensures G.GAME.cutil_vars contains all registered variables. Does not overwrite existing values.
 function CUTIL.ensure_variable_integrity()
+	if not G.GAME then return end
+
 	G.GAME.cutil_vars = G.GAME.cutil_vars or {}
 	for key, value in pairs(variables) do
 		if G.GAME.cutil_vars[key] == nil then
@@ -154,8 +169,17 @@ end
 -- that way, you only ever need to update the variable itself when you're sure you'll never need that value again.
 ---------------------------------------------
 
---- This is an ordered list of modifier functions.
-local modifiers = {}
+--- Registers a named modifier template, must be called at load time.
+--- fn receives (base_value, params) and returns the modified value.
+---
+--- @param name string
+--- @param fn function
+function CUTIL.register_modifier_type(name, fn)
+	assert(type(name) == "string", "modifier type name must be a string")
+	assert(type(fn) == "function", "modifier type fn must be a function")
+	
+	modifier_types[name] = fn
+end
 
 --- Adds a modifier to a target variable; returns the index of the modifier on the target variable.
 --- (That is, if there are already three modifiers on the given variable, it will be the fourth, having an index of four.)
@@ -164,63 +188,63 @@ local modifiers = {}
 --- @param target string
 --- @param modification function
 --- @return function
-function CUTIL.add_modifier(target, modification)
-	assert(type(modification) == "function", "modifier must be a function")
+function CUTIL.add_modifier(target, name, params)
+	assert(type(name) == "string", "modifier name must be a string")
+	assert(modifier_types[name], "unregistered modifier type: '" .. name .. "'")
+	if not G.GAME then return nil end
 	
-	modifiers[target] = modifiers[target] or {}
-	table.insert(modifiers[target], modification)
+	G.GAME.cutil_mods = G.GAME.cutil_mods or {}
+	G.GAME.cutil_mods[target] = G.GAME.cutil_mods[target] or {}
 	
-	return #modifiers[target]
+	table.insert(G.GAME.cutil_mods[target], { name = name, params = params or {} })	
+	CUTIL.update_game_variables()
+	
+	return #G.GAME.cutil_mods[target]
 end
 
 --- Removes a modifier.
 --- If modifier_index is nil, it instead removes all modifiers for the target variable.
 function CUTIL.remove_modifier(target, modifier_index)
-	if not modifiers[target] then return end
+	if not G.GAME or not G.GAME.cutil_mods or not G.GAME.cutil_mods[target] then return end
 	
-	if modifier_index == nil then
-		modifiers[target] = nil
-		return
+	if not modifier_index then
+		G.GAME.cutil_mods[target] = nil
+	else
+		table.remove(G.GAME.cutil_mods[target], modifier_index)
+		if #G.GAME.cutil_mods[target] == 0 then
+			G.GAME.cutil_mods[target] = nil
+		end
 	end
 	
-	table.remove(modifiers[target], modifier_index)
-	
-	if #modifiers[target] == 0 then
-		modifiers[target] = nil
-	end
+	CUTIL.update_game_variables()
 end
 
 function CUTIL.pop_modifier(target, modifier_index)
-	if modifier_index == nil then
-		local mods = modifiers[target]
+	if not G.GAME or not G.GAME.cutil_mods or not G.GAME.cutil_mods[target] then return end
+
+	if not modifier_index then
+		local mods = G.GAME.cutil_mods[target]
 		CUTIL.remove_modifier(target)
 		return mods
 	else
-		local mod = modifiers[target][modifier_index]
+		local mod = G.GAME.cutil_mods[target][modifier_index]
 		CUTIL.remove_modifier(target, modifier_index)
 		return mod
 	end
 end
 
-function CUTIL.set_modifier(target, modifier_index, new_modifier)
-	assert(type(new_modifier) == "function", "modifier must be a function")
-	assert(modifiers[target], "no modifiers for target")
+function CUTIL.set_modifier(target, modifier_index, name, params)
+	assert(type(name) == "string", "modifier name must be a string")
+	assert(modifier_types[name], "unregistered modifier type: '" .. name .. "'")
+	assert(G.GAME and G.GAME.cutil_mods and G.GAME.cutil_mods[target], "no modifiers for target")
 	
-	modifiers[target][modifier_index] = new_modifier
+	G.GAME.cutil_mods[target][modifier_index] = { name = name, params = params or {} }
+	CUTIL.update_game_variables()
 end
 
 function CUTIL.get_modifier(target, modifier_index)
-	if not modifiers[target] then return nil end
-	return modifiers[target][modifier_index]
-end
-
---- Ensures G.GAME.cutil_mods mirrors the modifier table.
---- This table is authoritative.
-function CUTIL.ensure_modifier_integrity()
-	G.GAME.cutil_mods = G.GAME.cutil_mods or {}
-	for target, list in pairs(modifiers) do
-		G.GAME.cutil_mods[target] = list
-	end
+	if not G.GAME or not G.GAME.cutil_mods or not G.GAME.cutil_mods[target] then return nil end
+	return G.GAME.cutil_mods[target][modifier_index]
 end
 
 ---------------------------------------------
@@ -230,6 +254,8 @@ end
 
 --- Applies all modifiers to all variables in the order they were applied.
 function CUTIL.update_game_variables()
+	if not G.GAME then return end
+
 	G.GAME.cutil_vars = G.GAME.cutil_vars or {}
 	G.GAME.cutil_mods = G.GAME.cutil_mods or {}
 	
@@ -238,7 +264,11 @@ function CUTIL.update_game_variables()
 		local mods = G.GAME.cutil_mods[key]
 		if mods then
 			for i = 1, #mods do
-				value = mods[i](value)
+				local mod = mods[i]
+				local fn = modifier_types[mod.name]
+				if fn then
+					value = fn(value, mod.params)
+				end
 			end
 		end
 		G.GAME.cutil_vars[key] = value
@@ -250,7 +280,7 @@ function Game:start_run(args)
 	local ret = game_start_run_hook(self, args)
 	
 	CUTIL.ensure_variable_integrity()
-	CUTIL.ensure_modifier_integrity()
+	CUTIL.update_game_variables()
 	
 	return ret
 end	

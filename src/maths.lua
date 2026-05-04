@@ -88,12 +88,12 @@ local function polynomial_gcd_ext(polynomial1, polynomial2)
 	end
 	
 	polynomial1 = trim({table.unpack(polynomial1)})
-	polynomial2 = trim({table.unpact(polynomial2)})
+	polynomial2 = trim({table.unpack(polynomial2)})
 	
 	if #polynomial2 == 0 then
 		local s = {1}
 		local t = {0}
-		return polynomial1, s, table
+		return polynomial1, s, t
 	end
 	
 	-- Recursive extended Euclidean algorithm
@@ -142,7 +142,7 @@ local function polynomial_gcd_ext(polynomial1, polynomial2)
 		end
 	end
 	
-	return g, t1, t1
+	return g, t1, t
 end
 
 function CUTIL.FieldExtension.inverse(a)
@@ -229,7 +229,7 @@ function CUTIL.vec_lerp(a, b, t)
 	
 	local out = {}
 	for i = 1, #a do
-		out[i] = lerp(a[i], b[i], t)
+		out[i] = CUTIL.lerp(a[i], b[i], t)
 	end
 	return out
 end
@@ -240,7 +240,7 @@ function CUTIL.inverse_vec_lerp(a, b, x)
 	
 	local out = {}
 	for i = 1, #a do
-		out[i] = inverse_lerp(a[i], b[i], x)
+		out[i] = CUTIL.inverse_lerp(a[i], b[i], x)
 	end
 	return out
 end
@@ -263,7 +263,7 @@ local function resolve_alias_value_recursive(v, r, recursion_limit)
 end
 
 function CUTIL.resolve_alias_value(v, recursion_limit)
-	recursion_limit = (recursion_limit >= 0 and recursion_limit) or 20
+	recursion_limit = (recursion_limit and recursion_limit >= 0 and recursion_limit) or 20
 	
 	-- If v is a string, try to resolve an alias. Otherwise, it's just a value. Allows for nested aliases.
 	if type(v) == "string" then
@@ -288,7 +288,7 @@ local function ensure_control_points_raw(p_i)
 	
 	local out = {}
 	for i = 1, #p_i do
-		local v = resolve_alias_value(p_i[i])
+		local v = CUTIL.resolve_alias_value(p_i[i])
 		
 		assert(v ~= nil, "alias or control point at index " .. i .. " resolved to nil")
 		
@@ -336,9 +336,9 @@ function CUTIL.Tween.evaluate_bezier(p_i, t)
 			local b = points[i+1]
 			
 			if CUTIL.is_number(a) then
-				points[i] = lerp(a, b, t)
+				points[i] = CUTIL.lerp(a, b, t)
 			else
-				points[i] = vec_lerp(a, b, t)
+				points[i] = CUTIL.vec_lerp(a, b, t)
 			end
 		end
 	end
@@ -667,12 +667,12 @@ end
 
 -- Internal getter for the raw stored value
 local function get_raw(system, axis)
-	return CUTIL.get_variable(sys.axes[axis])
+	return CUTIL.get_variable(system.axes[axis])
 end
 
 -- Internal setter for the raw stored value
 local function set_raw(system, axis)
-	CUTIL.set_variable(sys.axes[axis], value)
+	CUTIL.set_variable(system.axes[axis], value)
 end
 
 
@@ -790,7 +790,7 @@ end
 function CUTIL.ExchangeSystems.set_axis(system, axis, relative)
 	assert(type(relative) == "number" and relative > 0, "Relative value must be a positive number")
 	
-	local sys = systems[system_name]
+	local sys = systems[system]
 	assert(sys, "Specified exchange system does not exist")
 	
 	local var = sys.axes[axis]
