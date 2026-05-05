@@ -218,7 +218,10 @@ function CUTIL.Events.add(owner, name, fn, opts)
 	
 	-- Events have to have a unique id
 	for _, evt in ipairs(registry[bucket]) do
-		assert(not (evt.owner == owner and evt.name == name), "An event with the same owner and name already exists for that phase/bucket")
+		if evt.owner == owner and evt.name == name then
+			event_functions[event_var_name(owner, name)] = fn
+			return
+		end
 	end
 	
 	local event = {
@@ -420,63 +423,9 @@ function CUTIL.Events.add_calculate(owner, name, fn, opts)
 	return CUTIL.Events.add(owner, name, fn, opts)
 end
 
----------------------------------------------
--- Helper Functions To Make It Work
--- You can ignore these, these are just to make it work in Balatro properly
----------------------------------------------
-
--- Helper Joker
-SMODS.Joker {
-	key = "event_helper",
-	order = 0,
-	rarity = 1,
-	cost = 0,
-	
-	blueprint_compat = false,
-	perishable_compat = false,
-	no_collection = true,
-	no_doe = true,
-	
-	in_pool = function(self, args)
-		return false
-	end,
-	
-	loc_vars = function(self, info_queue, card)
-		return {}
-	end,
-	
-	calculate = function(self, card, context)
-		CUTIL.Events.dispatch(self, card, context)
-	end
-}
-
--- Hooking the Game:start_run function to add the helper Joker and its CardArea
-local game_start_run = Game.start_run
-function Game:start_run(args)
-	local ret = game_start_run(self, args)
-	
-	-- Establishes CardArea
-	self.cutil_helper_area = CardArea(
-		G.TILE_W - 600 * G.CARD_W - 200.95, -- Don't ask me what these parameters are but this seems to work
-		-100.1 * G.jokers.T.h,
-		0,
-		0,
-		{
-			card_limit = 1,
-			type = "joker",
-			highlighted_limit = 0
-		}
-	)
-	CUTIL.helper_area = G.cutil_helper_area
-	
-	if #CUTIL.helper_area.cards == 0 then
-		local event_helper = SMODS.add_card {
-			key = "j_coroboutil_event_helper",
-			area = CUTIL.helper_area,
-			skip_materialize = true,
-			no_edition = true
-		}
-	end
-	
+local smods_calculate_context = SMODS.calculate_context
+function SMODS.calculate_context(context, return_table)
+	local ret = smods_calculate_context(context, return_table)
+	CUTIL.Events.dispatch(nil, nil, context)
 	return ret
 end

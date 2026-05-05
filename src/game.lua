@@ -110,8 +110,8 @@ function CUTIL.add_variable(name, default_value)
 	if not variables[name] then
 		variables[name] = default_value
 		
-		CUTIL.ensure_variable_integrity()
 		CUTIL.update_game_variables()
+		CUTIL.ensure_variable_integrity()
 		
 		return true
 	end
@@ -141,8 +141,8 @@ end
 function CUTIL.set_variable(name, value)
 	variables[name] = value
 	
-	CUTIL.ensure_variable_integrity()
 	CUTIL.update_game_variables()
+	CUTIL.ensure_variable_integrity()
 end
 
 function CUTIL.get_variable(name)
@@ -188,13 +188,25 @@ end
 --- @param target string
 --- @param modification function
 --- @return function
-function CUTIL.add_modifier(target, name, params)
+function CUTIL.add_modifier(target, name, params, allowed_copies)
 	assert(type(name) == "string", "modifier name must be a string")
 	assert(modifier_types[name], "unregistered modifier type: '" .. name .. "'")
 	if not G.GAME then return nil end
 	
+	allowed_copies = allowed_copies or 1
+	local count = 0
+	
 	G.GAME.cutil_mods = G.GAME.cutil_mods or {}
 	G.GAME.cutil_mods[target] = G.GAME.cutil_mods[target] or {}
+	
+	for i, mod in ipairs(G.GAME.cutil_mods[target]) do
+		if mod.name == name then
+			count = count + 1
+			if count >= allowed_copies then
+				return i
+			end
+		end
+	end
 	
 	table.insert(G.GAME.cutil_mods[target], { name = name, params = params or {} })	
 	CUTIL.update_game_variables()
@@ -279,8 +291,8 @@ local game_start_run_hook = Game.start_run
 function Game:start_run(args)
 	local ret = game_start_run_hook(self, args)
 	
-	CUTIL.ensure_variable_integrity()
 	CUTIL.update_game_variables()
+	CUTIL.ensure_variable_integrity()
 	
 	return ret
 end	
